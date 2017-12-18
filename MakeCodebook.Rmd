@@ -1,0 +1,128 @@
+# Initial download, "raw" data 
+The data, downloaded from https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip, come in seperate files: the _test_ and _training_ data for _subjects_, _activities_, and phone _measurements_.  Each row of these data correspons to a single _person_ x _activity_, with hundreds of _measurements_ taken on each.   
+
+| Vector of subject IDs | Vector of activity values | Matrix of measurements |
+|--------------------|----------------------|------------------------|
+| _subject_train.txt_     | _y_train.txt_        | _x_train.txt_          |
+| _subject_test.txt_          | _y_test.txt_            | _x_test.txt_              |
+
+A features file lists the column headings for the measurements matrix. The feature names that corresponed to a mean or std are identified, and used to filter the measurements matrix.  Only measurements corresponding to a mean or std are kept.
+
+| Column headings for matrix of measurements | 
+|--------------------|
+| _features.txt_ | 
+
+An activity labels file gives a crosswalk between the activity values and their labels.
+
+| Activity values crosswalked with labels|  
+|--------------------|
+|_activity_labels.txt_ | 
+
+# First transformation into wide-form data
+1. The training and test data sets are stacked vertically with the _bind_rows_ function (dplyr package).  This is done seperately for subjects, activities, and measurements.
+2. The _grepl_ function is used to identify features names that contain the string "-mean()" or "-std()", and the _filter_ function is used to keep just the features that are flagged as such.  The measurements data are then restricted to just the columns where the feature number (V1, V2, etc) is %in% this list.
+3. The activities values are replaced with meaningful labels by merging the crosswalk and the activity values. 
+4. The variables are given meaningful names in the subjects and activity data sets.
+then horizontally merging the subject, activity, and (filtered) measurements matrix with the _bind_cols_ function. 
+5. The subjects, activities, and (filtered) measurements data frames are merged horizonally with the _bind_cols_ funciton (dplyr package) 
+
+# Second transformation into long-form data
+1. The _gather_ function (dplyr package) is used to transform the data into long form so that there is one row for every _subject_ x _activity_ x _measurement_. A single _value_ column holds the values that were previously listed under each measurement heading.  
+```r
+  LongFormData<-gather(
+    WideFormData
+    ,featNum                 #  All the true variables are hidden in the long feature names, so the key created here and is named "featNum" to easily merge with long names data
+    ,Value                   #  "Value" is the variable we create in the new data set to contain the data values
+    ,-c(SubjectID,Activity)) #  SubjectID and Activity are the variables that are already correct, so we don't gather them 
+```
+
+2. Using the _mgsub_ function (qdap package), abbreviations are searched for and replaced in the feature desctiption.  Then these expanded feature descriptions are pulled apart with the _str_match_ function (stringr package) to produce seven seperate variables.
+
+
+
+```r
+  #replacing abbreviations in feature names with long description
+  ToBeReplaced<-c("^t","^f","Acc","Gyro","Mag")
+  Replacements<-c("Time","Frequency","Accelerometer","Gyroscope","Magnitude")
+  KeptFeatures$FullNames<-mgsub(ToBeReplaced,Replacements,KeptFeatures$featDescription,fixed=FALSE)
+  
+  #pulling long descriptions apart to form all variables in seperate columns
+  VariableList<-mutate(KeptFeatures
+ 
+           ,Domain=coalesce(                               
+                  str_match(FullNames, "Time")        #if FullName contains the string "Time", str_match returns "Time" and this value is used
+                  ,str_match(FullNames, "Frequency"))  #otherwise, if FullNames contains the string "Frequency", str_match returns "Frequency" and this value is used
+           
+           ,Device=coalesce(
+                  str_match(FullNames, "Accelerometer")
+                  ,str_match(FullNames, "Gyroscope"))
+           
+           ,AccelerationComponent= coalesce(
+                  str_match(FullNames, "Body")
+                  ,str_match(FullNames, "Gravity"))
+           
+           ,Stat=coalesce(
+                  str_match(FullNames, "mean")
+                  ,str_match(FullNames, "std"))   
+     
+           ,Axis=coalesce(
+                  str_match(FullNames, "X")
+                  ,str_match(FullNames, "Y")
+                  ,str_match(FullNames, "Z")) 
+
+           ,Jerk=str_match(FullNames, "Jerk")
+           ,Magnitude=str_match(FullNames, "Magnitude")
+           
+      ) 
+``` 
+
+ 
+ 3. The long-form data produced in (1) is merged with the full set of variables produced in (2) to produce the pent-ultimate tidy data set.  This long-form data frame is filtered to inly contain the following columns
+
+Field name    | Meaning
+-----------------|------------
+SubjectID         | Subject's ID.  Between 1 and 30
+Activity         | Activity being performed
+Domain       | Whether measuring a Time or Frequency
+Device   | Whether measured with Accelerometer or Gyroscope
+AccelerationComponent | Whether measuring Body or Gravity acceleration
+Stat     | Whether value represents a mean or a standard deviation (std)
+Axis    | X, Y, or Z (or none of above) movement
+Jerk         | whether or not a jerk is being measured
+Magnitude        | whether or not a magnitude is being measured
+Value      | The actual numerical output from the measurement
+
+
+
+### Summary of long-form data
+
+```{r}
+summary(Tidy)
+```
+
+### Unique combinations of factors (except SubjectID) found in long-form data
+```{r}
+unique(VariableList[,4:10])
+```
+
+# Final transformation - calculating the means 
+
+Finally, since the assignment says we must create _".. a second, independent tidy data set with the average of each variable for each activity and each subject.", the _group_by_ function (dplyr package) is used to split the long-form data by _Activity_, _featNum_, _Domain_, _Device_, _AccelerationComponent_, _Stat_, _Axis_, _Jerk_, _Magnitude_, and _subjectID_ (all factors).
+
+A final data set, **_TidySummary_**, is produced by taking the mean and count of all variables with the _summarize_ function (dplyr package) 
+
+```r
+TidySummary<-summarise(meanVal=mean(Value,na.rm=TRUE),n=length(Value))
+```
+
+### Summary of TidySummary data
+```{r}
+summary(TidySummary)
+```
+
+
+
+codebook generated by run_analysis.R
+```{r}
+Sys.time()
+```
